@@ -111,9 +111,13 @@ bool performCommand(const char *cmdchar) {
     DLOG("Turning off\n");
     roomba.power();
     roombaState.cleaning = false;
-  } else if (cmd == "toggle" || cmd == "start_pause") {
-    DLOG("Toggling\n");
-    roomba.cover();
+  } else if (cmd == "start") {
+    if (!roombaState.cleaning) {
+      DLOG("Starting\n");
+      roomba.cover();
+    } else {
+      DLOG("Already cleaning\n");
+    }
   } else if (cmd == "stop") {
     if (roombaState.cleaning) {
       DLOG("Stopping\n");
@@ -416,6 +420,15 @@ void sendStatus() {
   root["voltage"] = roombaState.voltage;
   root["current"] = roombaState.current;
   root["charge"] = roombaState.charge;
+  String curState = "idle";
+  if (roombaState.docked) {
+    curState = "docked";
+  } else {
+    if (roombaState.cleaning) {
+      curState = "cleaning";
+    }
+  }
+  root["state"] = curState;
   String jsonStr;
   root.printTo(jsonStr);
   mqttClient.publish(statusTopic, jsonStr.c_str());
