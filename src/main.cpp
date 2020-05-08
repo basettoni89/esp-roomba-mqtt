@@ -39,6 +39,9 @@ typedef struct {
   // Derived state
   bool cleaning;
   bool docked;
+  bool sleeping;
+
+  int lastDockedTime;
 
   int timestamp;
   bool sent;
@@ -325,18 +328,27 @@ void readSensorPacket() {
   uint8_t packetLength;
   bool received = roomba.pollSensors(roombaPacket, sizeof(roombaPacket), &packetLength);
   if (received) {
-    RoombaState rs = {};
-    bool parsed = parseRoombaStateFromStreamPacket(roombaPacket, packetLength, &rs);
+    //RoombaState rs = {};
+    bool parsed = parseRoombaStateFromStreamPacket(roombaPacket, packetLength, &roombaState);
     verboseLogPacket(roombaPacket, packetLength);
     if (parsed) {
-      roombaState = rs;
+      //roombaState = rs;
+      roombaState.sent = false;
       VLOG("Got Packet of len=%d! Distance:%dmm ChargingState:%d Voltage:%dmV Current:%dmA Charge:%dmAh Capacity:%dmAh\n", packetLength, roombaState.distance, roombaState.chargingState, roombaState.voltage, roombaState.current, roombaState.charge, roombaState.capacity);
-      roombaState.cleaning = false;
-      roombaState.docked = false;
       if (roombaState.current < -400) {
         roombaState.cleaning = true;
+        roombaState.docked = false;
+        roombaState.sleeping = false;
       } else if (roombaState.current > -50) {
+        if(!roombaState.docked) {
+          roombaState.lastDockedTime = millis();
+        }
+        roombaState.cleaning = false;
         roombaState.docked = true;
+      } else {
+        roombaState.cleaning = false;
+        roombaState.docked = false;
+        roombaState.sleeping = false;
       }
     } else {
       VLOG("Failed to parse packet\n");
@@ -362,7 +374,7 @@ void setup() {
   String hostname(HOSTNAME);
   WiFi.hostname(hostname);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
+  WiFi.enableAP(false);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
   }
@@ -438,6 +450,8 @@ int lastStateMsgTime = 0;
 int lastWakeupTime = 0;
 int lastConnectTime = 0;
 
+int lastDebugMessage = 0;
+
 void loop() {
   // Important callbacks that _must_ happen every cycle
   ArduinoOTA.handle();
@@ -456,8 +470,14 @@ void loop() {
     lastConnectTime = now;
     reconnect();
   }
+  //Calculate if need to sleep and turn it off
+  if(!roombaState.sleeping && roombaState.docked && now - roombaState.lastDockedTime > 10000){
+    DLOG("Roomba start sleeping\n");
+    roombaState.sleeping = true;
+    roomba.power();
+  }
   // Wakeup the roomba at fixed intervals
-  if (now - lastWakeupTime > 50000) {
+  if (!roombaState.sleeping && now - lastWakeupTime > 50000) {
     lastWakeupTime = now;
     if (!roombaState.cleaning) {
       if (roombaState.docked) {
@@ -471,7 +491,7 @@ void loop() {
     }
   }
   // Report the status over mqtt at fixed intervals
-  if (now - lastStateMsgTime > 10000) {
+  if (!roombaState.sleeping && now - lastStateMsgTime > 10000) {
     lastStateMsgTime = now;
     if (now - roombaState.timestamp > 30000 || roombaState.sent) {
       DLOG("Roomba state already sent (%.1fs old)\n", (now - roombaState.timestamp)/1000.0);
@@ -482,6 +502,11 @@ void loop() {
       roombaState.sent = true;
     }
     sleepIfNecessary();
+  }
+
+  if(now - lastDebugMessage > 1000) {
+    lastDebugMessage = now;
+    DLOG("Current status: cleaning %d - docked %d - lastDocked %.1fs- sleeping %d\n", roombaState.cleaning, roombaState.docked, (now - roombaState.lastDockedTime)/1000.0, roombaState.sleeping);
   }
 
   readSensorPacket();

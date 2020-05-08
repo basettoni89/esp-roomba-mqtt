@@ -1,7 +1,7 @@
 #include "secrets.h"
 
-#define HOSTNAME "roomba" // e.g. roomba.local
-#define BRC_PIN 14
+#define HOSTNAME "roomba-esp01" // e.g. roomba.local
+#define BRC_PIN 2
 #define ROOMBA_650_SLEEP_FIX 1
 
 #define ADC_VOLTAGE_DIVIDER 44.551316985
